@@ -10,14 +10,36 @@ quando Claude è irraggiungibile, che è esattamente lo scenario per cui serve.
 
 ## Installazione
 
-```bash
-npm install -g git+https://github.com/riccardo-runci/claude-codex-handoff.git
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/riccardo-runci/claude-codex-handoff/main/install.ps1 | iex
 ```
 
-Questo installa il comando globale `claude-handoff` e, in automatico (best-effort),
-lo slash-command `/claude-handoff` dentro Claude Code (copiato in `~/.claude/commands/`).
+**macOS / Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/riccardo-runci/claude-codex-handoff/main/install.sh | bash
+```
 
-Requisiti: Node.js ≥ 18. [Codex CLI](https://developers.openai.com/codex/cli) è
+Questo clona la repo in `~/.claude-handoff` e crea il comando globale `claude-handoff`
+via `npm link`, installando anche (best-effort) lo slash-command `/claude-handoff`
+dentro Claude Code (copiato in `~/.claude/commands/`).
+
+> Non usare `npm install -g git+https://...` per questo pacchetto: su Windows soffre
+> di un bug noto di npm con le dipendenze git installate globalmente (symlink verso
+> una cartella temporanea della cache che può sparire prima che il postinstall giri),
+> che fa fallire l'installazione in modo intermittente. Lo script sopra lo evita del
+> tutto usando un `git clone` in una cartella stabile.
+
+**Aggiornare:** rilancia lo stesso comando di installazione — fa `git pull` + re-link.
+
+**Manuale** (equivalente a quanto fanno gli script sopra):
+```bash
+git clone https://github.com/riccardo-runci/claude-codex-handoff.git ~/.claude-handoff
+cd ~/.claude-handoff
+npm link
+```
+
+Requisiti: Node.js ≥ 18, git. [Codex CLI](https://developers.openai.com/codex/cli) è
 necessario solo se usi `--run-codex`.
 
 ## Uso
