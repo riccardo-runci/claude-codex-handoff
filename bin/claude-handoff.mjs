@@ -67,7 +67,7 @@ Esempi:
 
 function encodeProjectDir(projectPath) {
   const abs = path.resolve(projectPath);
-  return abs.replace(/[\\/:]/g, "-");
+  return abs.replace(/[^a-zA-Z0-9]/g, "-");
 }
 
 function findSessionFile(project, sessionId) {
