@@ -20,6 +20,7 @@ function parseArgs(argv) {
     session: null,
     out: null,
     maxToolOutput: 2000,
+    maxTotalChars: 700000,
     runCodex: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -28,6 +29,7 @@ function parseArgs(argv) {
     else if (a === "--session") out.session = argv[++i];
     else if (a === "--out") out.out = argv[++i];
     else if (a === "--max-tool-output") out.maxToolOutput = parseInt(argv[++i], 10);
+    else if (a === "--max-total-chars") out.maxTotalChars = parseInt(argv[++i], 10);
     else if (a === "--run-codex") out.runCodex = true;
     else if (a === "--help" || a === "-h") {
       printHelp();
@@ -54,6 +56,9 @@ Opzioni:
   --session <uuid>       Sessione specifica (default: piu' recente per mtime)
   --out <path>           File di output (default: ./handoff-<id>-<ts>.md)
   --max-tool-output <n>  Caratteri max per output dei tool (default: 2000)
+  --max-total-chars <n>  Limite totale caratteri conversazione, tronca i turni
+                         piu' vecchi tenendo i piu' recenti (default: 700000;
+                         Codex CLI rifiuta input oltre ~1048576 caratteri)
   --run-codex            Lancia subito 'codex exec' col file generato
   -h, --help             Questo help
 
@@ -239,7 +244,26 @@ function formatTurn(t) {
   }
 }
 
-function buildMarkdown({ project, sessionFile, sessionId, turns, unresolved, touchedFiles, git }) {
+function truncateTurns(turns, maxChars) {
+  const formatted = turns.map(formatTurn);
+  const total = formatted.reduce((sum, s) => sum + s.length, 0);
+  if (total <= maxChars) {
+    return { turns, droppedCount: 0 };
+  }
+
+  let kept = [];
+  let usedChars = 0;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const len = formatted[i].length;
+    if (usedChars + len > maxChars) break;
+    kept.unshift(turns[i]);
+    usedChars += len;
+  }
+
+  return { turns: kept, droppedCount: turns.length - kept.length };
+}
+
+function buildMarkdown({ project, sessionFile, sessionId, turns, unresolved, touchedFiles, git, droppedCount }) {
   const lines = [];
   lines.push(`# Handoff Claude Code -> Codex`);
   lines.push("");
@@ -269,6 +293,14 @@ function buildMarkdown({ project, sessionFile, sessionId, turns, unresolved, tou
 
   lines.push(`## Conversazione`);
   lines.push("");
+  if (droppedCount > 0) {
+    lines.push(
+      `> **Nota:** i ${droppedCount} turni piu' vecchi sono stati omessi per rientrare nel limite ` +
+        `di dimensione input (Codex CLI rifiuta prompt oltre ~1048576 caratteri). Sotto trovi solo la parte ` +
+        `piu' recente della conversazione, quella rilevante per riprendere il task da dove si e' fermato.`
+    );
+    lines.push("");
+  }
   for (const t of turns) {
     lines.push(formatTurn(t));
   }
@@ -326,7 +358,8 @@ function main() {
   const sessionFile = findSessionFile(args.project, args.session);
   const sessionId = path.basename(sessionFile, ".jsonl");
   const entries = readJsonl(sessionFile);
-  const { turns, lastAssistantHadUnresolvedToolUse } = flattenTurns(entries, args.maxToolOutput);
+  const { turns: allTurns, lastAssistantHadUnresolvedToolUse } = flattenTurns(entries, args.maxToolOutput);
+  const { turns, droppedCount } = truncateTurns(allTurns, args.maxTotalChars);
   const touchedFiles = collectTouchedFiles(entries);
   const git = gitState(args.project);
 
@@ -338,6 +371,7 @@ function main() {
     unresolved: lastAssistantHadUnresolvedToolUse,
     touchedFiles,
     git,
+    droppedCount,
   });
 
   const outPath =
@@ -351,6 +385,12 @@ function main() {
   console.log(`Sessione usata: ${sessionId}`);
   if (lastAssistantHadUnresolvedToolUse) {
     console.log("Attenzione: task probabilmente interrotto a meta' (tool_use senza risultato).");
+  }
+  if (droppedCount > 0) {
+    console.log(
+      `Attenzione: conversazione troppo grande, ${droppedCount} turni piu' vecchi omessi ` +
+        `(usa --max-total-chars per alzare/abbassare il limite, default 700000).`
+    );
   }
 
   const codexBin = findCodexBinary();

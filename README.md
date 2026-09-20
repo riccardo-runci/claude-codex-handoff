@@ -51,6 +51,7 @@ claude-handoff --project C:\percorso\progetto      # handoff per un progetto spe
 claude-handoff --session <uuid>                    # sessione specifica (default: la più recente)
 claude-handoff --out contesto.md                   # file di output custom
 claude-handoff --max-tool-output 5000               # più contesto per output dei tool
+claude-handoff --max-total-chars 500000              # limite totale più basso (default 700000)
 claude-handoff --run-codex                          # genera l'handoff E lancia subito Codex con quel contesto
 ```
 
@@ -63,7 +64,9 @@ Da dentro Claude Code, `/claude-handoff` fa la stessa cosa (utile mentre Claude
 ## Cosa genera
 
 Un file markdown con:
-- conversazione completa (testo utente/assistente, tool call, risultati tool)
+- conversazione completa (testo utente/assistente, tool call, risultati tool), troncata
+  automaticamente ai turni più recenti se supera `--max-total-chars` (default 700000,
+  per stare sotto il limite di ~1MB che Codex CLI impone all'input)
 - nota esplicita se l'ultima azione era un tool-call senza risultato (task interrotto a metà)
 - elenco dei file toccati nella sessione
 - stato git del progetto (branch, `status`, `diff`)
