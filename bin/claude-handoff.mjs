@@ -21,6 +21,7 @@ function parseArgs(argv) {
     out: null,
     maxToolOutput: 2000,
     maxTotalChars: 700000,
+    maxDiffChars: 50000,
     runCodex: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -30,6 +31,7 @@ function parseArgs(argv) {
     else if (a === "--out") out.out = argv[++i];
     else if (a === "--max-tool-output") out.maxToolOutput = parseInt(argv[++i], 10);
     else if (a === "--max-total-chars") out.maxTotalChars = parseInt(argv[++i], 10);
+    else if (a === "--max-diff-chars") out.maxDiffChars = parseInt(argv[++i], 10);
     else if (a === "--run-codex") out.runCodex = true;
     else if (a === "--help" || a === "-h") {
       printHelp();
@@ -56,9 +58,10 @@ Opzioni:
   --session <uuid>       Sessione specifica (default: piu' recente per mtime)
   --out <path>           File di output (default: ./handoff-<id>-<ts>.md)
   --max-tool-output <n>  Caratteri max per output dei tool (default: 2000)
-  --max-total-chars <n>  Limite totale caratteri conversazione, tronca i turni
-                         piu' vecchi tenendo i piu' recenti (default: 700000;
+  --max-total-chars <n>  Limite totale caratteri dell'intero documento, tronca i
+                         turni piu' vecchi tenendo i piu' recenti (default: 700000;
                          Codex CLI rifiuta input oltre ~1048576 caratteri)
+  --max-diff-chars <n>   Caratteri max per il 'git diff' incluso (default: 50000)
   --run-codex            Lancia subito 'codex exec' col file generato
   -h, --help             Questo help
 
@@ -205,19 +208,20 @@ function collectTouchedFiles(entries) {
   return [...files].sort();
 }
 
-function gitState(project) {
+function gitState(project, maxDiffChars) {
   try {
     const status = execFileSync("git", ["status", "--short"], {
       cwd: project,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
-    const diff = execFileSync("git", ["diff", "HEAD"], {
+    const rawDiff = execFileSync("git", ["diff", "HEAD"], {
       cwd: project,
       encoding: "utf8",
       maxBuffer: 20 * 1024 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
     });
+    const diff = truncate(rawDiff, maxDiffChars);
     const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
       cwd: project,
       encoding: "utf8",
@@ -359,9 +363,24 @@ function main() {
   const sessionId = path.basename(sessionFile, ".jsonl");
   const entries = readJsonl(sessionFile);
   const { turns: allTurns, lastAssistantHadUnresolvedToolUse } = flattenTurns(entries, args.maxToolOutput);
-  const { turns, droppedCount } = truncateTurns(allTurns, args.maxTotalChars);
   const touchedFiles = collectTouchedFiles(entries);
-  const git = gitState(args.project);
+  const git = gitState(args.project, args.maxDiffChars);
+
+  // Prima misura quanto pesa il documento senza la conversazione (header, task,
+  // file toccati, stato git/diff), poi assegna il budget residuo ai turni: cosi'
+  // il limite --max-total-chars vale sul documento intero, non solo sui turni.
+  const skeleton = buildMarkdown({
+    project: args.project,
+    sessionFile,
+    sessionId,
+    turns: [],
+    unresolved: lastAssistantHadUnresolvedToolUse,
+    touchedFiles,
+    git,
+    droppedCount: 0,
+  });
+  const conversationBudget = Math.max(0, args.maxTotalChars - skeleton.length - 2000);
+  const { turns, droppedCount } = truncateTurns(allTurns, conversationBudget);
 
   const md = buildMarkdown({
     project: args.project,
